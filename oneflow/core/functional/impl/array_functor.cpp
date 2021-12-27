@@ -14,6 +14,7 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
+#include <cstdint>
 #include "oneflow/core/autograd/autograd_mode.h"
 #include "oneflow/core/common/scalar.h"
 #include "oneflow/core/common/global.h"
@@ -612,6 +613,75 @@ class GatherFunctor {
     MutableAttrMap attrs;
     JUST(attrs.SetAttr<int64_t>("axis", axis));
     return OpInterpUtil::Dispatch<Tensor>(*op_, {x, indices}, attrs);
+  }
+
+ private:
+  std::shared_ptr<OpExpr> op_;
+};
+
+class EmbeddingRenormFunctor {
+ public:
+  EmbeddingRenormFunctor() {
+    op_ = CHECK_JUST(one::OpBuilder("embedding_renorm")
+                         .Input("in")
+                         .Input("indices")
+                         .Output("out")
+                         .Build());
+  }
+  Maybe<Tensor> operator()(const std::shared_ptr<one::Tensor>& in,
+                           const std::shared_ptr<one::Tensor>& indices, 
+                           const double& max_norm, const double& norm_type) const {
+    MutableAttrMap attrs;
+    JUST(attrs.SetAttr<int64_t>("max_norm", max_norm));
+    JUST(attrs.SetAttr<int64_t>("norm_type", norm_type));
+    return OpInterpUtil::Dispatch<Tensor>(*op_, {in, indices}, attrs);
+  }
+
+ private:
+  std::shared_ptr<OpExpr> op_;
+};
+
+class EmbeddingFunctor {
+ public:
+  EmbeddingRenormFunctor() {
+    op_ = CHECK_JUST(one::OpBuilder("embedding")
+                         .Input("weight")
+                         .Input("indices")
+                         .Output("out")
+                         .Build());
+  }
+  Maybe<Tensor> operator()(const std::shared_ptr<one::Tensor>& weight,
+                           const std::shared_ptr<one::Tensor>& indices, 
+                           const Optional<int32_t>& padding_idx, const bool& scale_grad_by_freq) const {
+    int32_t padding_idx_ = padding_idx ? JUST(padding_idx) : -1;
+    MutableAttrMap attrs;
+    JUST(attrs.SetAttr<int64_t>("padding_idx", padding_idx_));
+    JUST(attrs.SetAttr<bool>("scale_grad_by_freq", scale_grad_by_freq));
+    return OpInterpUtil::Dispatch<Tensor>(*op_, {weight, indices}, attrs);
+  }
+
+ private:
+  std::shared_ptr<OpExpr> op_;
+};
+
+class EmbeddingGradFunctor {
+ public:
+  EmbeddingRenormFunctor() {
+    op_ = CHECK_JUST(one::OpBuilder("embedding_grad")
+                         .Input("dy")
+                         .Input("weight")
+                         .Input("indices")
+                         .Output("dx")
+                         .Build());
+  }
+  Maybe<Tensor> operator()(const std::shared_ptr<one::Tensor>& dy,
+                           const std::shared_ptr<one::Tensor>& weight, 
+                           const std::shared_ptr<one::Tensor>& indices, 
+                           const int32_t& padding_idx, const bool& padding_idx) const {
+    MutableAttrMap attrs;
+    JUST(attrs.SetAttr<int64_t>("padding_idx", padding_idx));
+    JUST(attrs.SetAttr<bool>("scale_grad_by_freq", padding_idx));
+    return OpInterpUtil::Dispatch<Tensor>(*op_, {dy,weight, indices}, attrs);
   }
 
  private:
@@ -2387,6 +2457,9 @@ ONEFLOW_FUNCTION_LIBRARY(m) {
   m.add_functor<impl::ExpandDimsFunctor>("Unsqueeze");
   m.add_functor<impl::RollFunctor>("Roll");
   m.add_functor<impl::GatherFunctor>("Gather");
+  m.add_functor<impl::EmbeddingRenormFunctor>("Embedding_renorm");
+  m.add_functor<impl::EmbeddingFunctor>("Embedding");
+  m.add_functor<impl::EmbeddingGradFunctor>("EmbeddingGrad");
   m.add_functor<impl::DimGatherFunctor>("DimGather");
   m.add_functor<impl::ArgSortFunctor>("ArgSort");
   m.add_functor<impl::GatherNdFunctor>("GatherNd");
