@@ -45,12 +45,12 @@ class CpuEmbeddingRenormKernel final : public user_op::OpKernel {
     const index_T* indices_buf = indices->dptr<index_T>();
     T* out_buf = out->mut_dptr<T>();
     const int32_t num_indices = indices->shape().elem_cnt();
-
-    EmbeddingFunctor<DeviceType::kCPU,T, index_T>()(ctx->stream(), in_buf, indices_buf, out_buf, 
+    EmbeddingRenormFunctor<DeviceType::kCPU,T, index_T>()(ctx->stream(), in_buf, indices_buf, out_buf, 
                                                           max_norm, norm_type, dim0, dim1, num_indices);
   }
   bool AlwaysComputeWhenAllOutputsEmpty() const override { return false; }
 };
+
 
 
 template<typename T,typename index_T>
@@ -65,15 +65,14 @@ class CpuEmbeddingKernel final : public user_op::OpKernel {
     const user_op::Tensor* indices = ctx->Tensor4ArgNameAndIndex("indices", 0);
     user_op::Tensor* out = ctx->Tensor4ArgNameAndIndex("out", 0);
     const int32_t padding_idx = ctx->Attr<int32_t>("padding_idx");
-    const int32_t scale_grad_by_freq = ctx->Attr<int32_t>("scale_grad_by_freq");
-    
+    const bool scale_grad_by_freq = ctx->Attr<bool>("scale_grad_by_freq");
+
     const ShapeView& out_shape = out->shape();
-    const int32_t dim0 = out_shape.count(0 , dy_shape.elem_cnt()-1);
-    const int32_t dim1 = out_shape.At(dy_shape.elem_cnt()-1);
+    const int32_t dim0 = out_shape.Count(0 , out_shape.NumAxes()-1);
+    const int32_t dim1 = out_shape.At(out_shape.NumAxes()-1);
     const int32_t emb_size = weight->shape().At(0);
-    
     const T* weight_buf = weight->dptr<T>();
-    const index_T* indices_buf = indices->dptr<T>();
+    const index_T* indices_buf = indices->dptr<index_T>();
     T* out_buf = out->mut_dptr<T>();
 
     EmbeddingFunctor<DeviceType::kCPU,T, index_T>()(ctx->stream(), weight_buf, indices_buf, out_buf, 
@@ -81,7 +80,6 @@ class CpuEmbeddingKernel final : public user_op::OpKernel {
   }
   bool AlwaysComputeWhenAllOutputsEmpty() const override { return false; }
 };
-
 
 template<typename T,typename index_T>
 class CpuEmbeddingGradKernel final : public user_op::OpKernel {
@@ -96,16 +94,17 @@ class CpuEmbeddingGradKernel final : public user_op::OpKernel {
     const user_op::Tensor* indices = ctx->Tensor4ArgNameAndIndex("indices", 0);
     user_op::Tensor* dx = ctx->Tensor4ArgNameAndIndex("dx", 0);
     const int32_t padding_idx = ctx->Attr<int32_t>("padding_idx");
-    const int32_t scale_grad_by_freq = ctx->Attr<int32_t>("scale_grad_by_freq");
+    const bool scale_grad_by_freq = ctx->Attr<bool>("scale_grad_by_freq");
     
     const ShapeView& dy_shape = dy->shape();
-    const int32_t dim0 = dy_shape.count(0 , dy_shape.elem_cnt()-1);
-    const int32_t dim1 = dy_shape.At(dy_shape.elem_cnt()-1);
+    const int32_t dim0 = dy_shape.Count(0 , dy_shape.NumAxes()-1);
+    const int32_t dim1 = dy_shape.At(dy_shape.NumAxes()-1);
     const int32_t emb_size = weight->shape().At(0);
     
     const T* dy_buf = dy->dptr<T>();
-    const index_T* indices_buf = indices->dptr<T>();
+    const index_T* indices_buf = indices->dptr<index_T>();
     T* dx_buf = dx->mut_dptr<T>();
+    Memset<DeviceType::kCPU>(ctx->stream(), dx_buf, 0, dx->shape().Count(0) * sizeof(T));
     EmbeddingGradFunctor<DeviceType::kCPU,T, index_T>()(ctx->stream(), dy_buf, indices_buf, dx_buf, 
                                               padding_idx, scale_grad_by_freq, dim0, dim1, emb_size);
   }
@@ -113,5 +112,31 @@ class CpuEmbeddingGradKernel final : public user_op::OpKernel {
 };
 
 
+#define REGISTER_CPUEMBEDDING_KERNEL(in_type, indices_type)                                       \
+    REGISTER_USER_KERNEL("embedding_renorm")                                                      \
+      .SetCreateFn<                                                                               \
+          CpuEmbeddingRenormKernel<OF_PP_PAIR_FIRST(in_type), OF_PP_PAIR_FIRST(indices_type)>>()  \
+      .SetIsMatchedHob(                                                                           \
+          (user_op::HobDeviceType() == DeviceType::kCPU)                                          \
+          && (user_op::HobDataType("in", 0) == OF_PP_PAIR_SECOND(in_type))                        \
+          && (user_op::HobDataType("indices", 0) == OF_PP_PAIR_SECOND(indices_type)));            \
+    REGISTER_USER_KERNEL("embedding")                                                             \
+      .SetCreateFn<                                                                               \
+          CpuEmbeddingKernel<OF_PP_PAIR_FIRST(in_type), OF_PP_PAIR_FIRST(indices_type)>>()        \
+      .SetIsMatchedHob(                                                                           \
+          (user_op::HobDeviceType() == DeviceType::kCPU)                                          \
+          && (user_op::HobDataType("weight", 0) == OF_PP_PAIR_SECOND(in_type))                    \
+          && (user_op::HobDataType("indices", 0) == OF_PP_PAIR_SECOND(indices_type)));            \
+    REGISTER_USER_KERNEL("embedding_grad")                                                        \
+      .SetCreateFn<                                                                               \
+          CpuEmbeddingGradKernel<OF_PP_PAIR_FIRST(in_type), OF_PP_PAIR_FIRST(indices_type)>>()    \
+      .SetIsMatchedHob(                                                                           \
+          (user_op::HobDeviceType() == DeviceType::kCPU)                                          \
+          && (user_op::HobDataType("weight", 0) == OF_PP_PAIR_SECOND(in_type))                    \
+          && (user_op::HobDataType("indices", 0) == OF_PP_PAIR_SECOND(indices_type)));
+
+OF_PP_SEQ_PRODUCT_FOR_EACH_TUPLE(REGISTER_CPUEMBEDDING_KERNEL, EMBEDDING_DATA_TYPE_SEQ,
+                                 INDEX_DATA_TYPE_SEQ)
+#undef REGISTER_CPUEMBEDDING_KERNEL
 
 }  // namespace oneflow

@@ -743,7 +743,7 @@
   signature: " Tensor (Tensor input, Int64 dim, Tensor index, Bool sparse_grad=False) => DimGather"
   bind_python: True
 
-- name: "embedding_renorm"
+- name: "embedding_renorm_"
   signature: " Tensor (Tensor in, Tensor indices, Double max_norm, Double norm_type=2) => Embedding_renorm"
   bind_python: True
 

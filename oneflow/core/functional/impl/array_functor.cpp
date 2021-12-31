@@ -631,10 +631,20 @@ class EmbeddingRenormFunctor {
   Maybe<Tensor> operator()(const std::shared_ptr<one::Tensor>& in,
                            const std::shared_ptr<one::Tensor>& indices, 
                            const double& max_norm, const double& norm_type) const {
+    // JUST(CheckInplaceValid(in));
+    std::shared_ptr<TensorTuple> outputs = std::make_shared<TensorTuple>(1);
+    outputs->at(0) = in;
+    
     MutableAttrMap attrs;
-    JUST(attrs.SetAttr<int64_t>("max_norm", max_norm));
-    JUST(attrs.SetAttr<int64_t>("norm_type", norm_type));
-    return OpInterpUtil::Dispatch<Tensor>(*op_, {in, indices}, attrs);
+    JUST(attrs.SetAttr<double>("max_norm", max_norm));
+    JUST(attrs.SetAttr<double>("norm_type", norm_type));
+
+    JUST(OpInterpUtil::Dispatch(*op_, {in, indices}, outputs.get(), attrs));
+    return outputs->at(0);
+    // MutableAttrMap attrs;
+    // JUST(attrs.SetAttr<double>("max_norm", max_norm));
+    // JUST(attrs.SetAttr<double>("norm_type", norm_type));
+    // return OpInterpUtil::Dispatch<Tensor>(*op_, {in, indices}, attrs);
   }
 
  private:
@@ -643,7 +653,7 @@ class EmbeddingRenormFunctor {
 
 class EmbeddingFunctor {
  public:
-  EmbeddingRenormFunctor() {
+  EmbeddingFunctor() {
     op_ = CHECK_JUST(one::OpBuilder("embedding")
                          .Input("weight")
                          .Input("indices")
@@ -655,7 +665,7 @@ class EmbeddingFunctor {
                            const Optional<int32_t>& padding_idx, const bool& scale_grad_by_freq) const {
     int32_t padding_idx_ = padding_idx ? JUST(padding_idx) : -1;
     MutableAttrMap attrs;
-    JUST(attrs.SetAttr<int64_t>("padding_idx", padding_idx_));
+    JUST(attrs.SetAttr<int32_t>("padding_idx", padding_idx_));
     JUST(attrs.SetAttr<bool>("scale_grad_by_freq", scale_grad_by_freq));
     return OpInterpUtil::Dispatch<Tensor>(*op_, {weight, indices}, attrs);
   }
@@ -666,7 +676,7 @@ class EmbeddingFunctor {
 
 class EmbeddingGradFunctor {
  public:
-  EmbeddingRenormFunctor() {
+  EmbeddingGradFunctor() {
     op_ = CHECK_JUST(one::OpBuilder("embedding_grad")
                          .Input("dy")
                          .Input("weight")
@@ -677,11 +687,11 @@ class EmbeddingGradFunctor {
   Maybe<Tensor> operator()(const std::shared_ptr<one::Tensor>& dy,
                            const std::shared_ptr<one::Tensor>& weight, 
                            const std::shared_ptr<one::Tensor>& indices, 
-                           const int32_t& padding_idx, const bool& padding_idx) const {
+                           const int32_t& padding_idx, const bool& scale_grad_by_freq) const {
     MutableAttrMap attrs;
-    JUST(attrs.SetAttr<int64_t>("padding_idx", padding_idx));
-    JUST(attrs.SetAttr<bool>("scale_grad_by_freq", padding_idx));
-    return OpInterpUtil::Dispatch<Tensor>(*op_, {dy,weight, indices}, attrs);
+    JUST(attrs.SetAttr<int32_t>("padding_idx", padding_idx));
+    JUST(attrs.SetAttr<bool>("scale_grad_by_freq", scale_grad_by_freq));
+    return OpInterpUtil::Dispatch<Tensor>(*op_, {dy, weight, indices}, attrs);
   }
 
  private:

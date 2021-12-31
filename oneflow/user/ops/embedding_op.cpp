@@ -18,9 +18,7 @@ limitations under the License.
 
 namespace oneflow {
 
-namespace {
-
-REGISTER_USER_OP("embedding_renorm")
+REGISTER_NO_GRAD_USER_OP("embedding_renorm")
     .Input("in")
     .Input("indices")
     .Output("out")
@@ -48,8 +46,8 @@ REGISTER_USER_OP("embedding")
     .SetTensorDescInferFn([](user_op::InferContext* ctx) -> Maybe<void> {
       const Shape& weight_shape = ctx->InputShape("weight", 0);
       const Shape& indices_shape = ctx->InputShape("indices", 0);
-      CHECK_EQ_OR_RETURN(in_shape.NumAxes(), 2);
-  
+      CHECK_EQ_OR_RETURN(weight_shape.NumAxes(), 2);
+
       DimVector out_vec;
       out_vec.insert(out_vec.end(), indices_shape.dim_vec().cbegin(), indices_shape.dim_vec().cend());
       out_vec.push_back(weight_shape.At(1));
@@ -65,30 +63,30 @@ REGISTER_USER_OP("embedding")
     .SetGetSbpFn([](user_op::SbpContext* ctx) -> Maybe<void> {
       const user_op::TensorDesc& weight_tensor = ctx->LogicalTensorDesc4InputArgNameAndIndex("weight", 0);
       const user_op::TensorDesc& indices_tensor = ctx->LogicalTensorDesc4InputArgNameAndIndex("indices", 0);
-      user_op::TensorDesc& out_tensor = ctx->LogicalTensorDesc4InputArgNameAndIndex("out", 0);
+      const user_op::TensorDesc& out_tensor = ctx->LogicalTensorDesc4InputArgNameAndIndex("out", 0);
       const int32_t padding_idx = ctx->Attr<int32_t>("padding_idx");
       const bool scale_grad_by_freq = ctx->Attr<bool>("scale_grad_by_freq");
-
+      
       int32_t out_num_axes = out_tensor.shape().NumAxes();
 
       if(padding_idx < 0 && !scale_grad_by_freq){
           for(int32_t i = 0; i < out_num_axes-1; i++){
              ctx->NewBuilder()
-                .Broadcast(user_op::OpArg("weight", 0), 0)
-                .split(user_op::OpArg("indices", i))
+                .Split(user_op::OpArg("indices", 0), i)
+                .Broadcast(user_op::OpArg("weight", 0))
                 .Split(user_op::OpArg("out", 0), i)
                 .Build();
           }
 
           ctx->NewBuilder()
-            .Split(user_op::OpArg("weight", 0), 0)
-            .Broadcast(user_op::OpArg("indices", 0))
-            .Split(user_op::OpArg("out", 0), out_num_axes-1)
-            .Build();
+          .Split(user_op::OpArg("weight", 0), 0)
+          .Broadcast(user_op::OpArg("indices", 0))
+          .Split(user_op::OpArg("out", 0), out_num_axes-1)
+          .Build();
       }
 
       return Maybe<void>::Ok();
-    })
+    });
 
 REGISTER_USER_OP("embedding_grad")
     .Input("dy")
@@ -112,7 +110,7 @@ REGISTER_USER_OP("embedding_grad")
       const user_op::TensorDesc& dy_tensor = ctx->LogicalTensorDesc4InputArgNameAndIndex("dy", 0);
       const user_op::TensorDesc& weight_tensor = ctx->LogicalTensorDesc4InputArgNameAndIndex("weight", 0);
       const user_op::TensorDesc& indices_tensor = ctx->LogicalTensorDesc4InputArgNameAndIndex("indices", 0);
-      user_op::TensorDesc& dx_tensor = ctx->LogicalTensorDesc4InputArgNameAndIndex("dx", 0);
+      const user_op::TensorDesc& dx_tensor = ctx->LogicalTensorDesc4InputArgNameAndIndex("dx", 0);
       const int32_t padding_idx = ctx->Attr<int32_t>("padding_idx");
       const bool scale_grad_by_freq = ctx->Attr<bool>("scale_grad_by_freq");
 
@@ -122,21 +120,21 @@ REGISTER_USER_OP("embedding_grad")
           for(int32_t i = 0; i < dy_num_axes - 1; i++){
              ctx->NewBuilder()
                 .Broadcast(user_op::OpArg("dy", 0))
-                .Broadcast(user_op::OpArg("weight", 0), 0)
-                .split(user_op::OpArg("indices", i))
+                .Broadcast(user_op::OpArg("weight", 0))
+                .Split(user_op::OpArg("indices", 0), i)
                 .PartialSum(user_op::OpArg("dx", 0))
                 .Build();
           }
 
           ctx->NewBuilder()
             .Split(user_op::OpArg("dy", 0), dy_num_axes-1)
-            .split(user_op::OpArg("weight", 1))
+            .Split(user_op::OpArg("weight", 0), 1)
             .Broadcast(user_op::OpArg("indices", 0))
             .Split(user_op::OpArg("dx", 0), 1)
             .Build();
       }
       return Maybe<void>::Ok();
-    })
+    });
 
 
 REGISTER_USER_OP_GRAD("embedding").SetGenBackwardOpConfFn([](const user_op::UserOpWrapper& op,
@@ -151,7 +149,7 @@ REGISTER_USER_OP_GRAD("embedding").SetGenBackwardOpConfFn([](const user_op::User
             .Input("indices", op.input("indices", 0))
             .Output("dx")
             .Attr("padding_idx", op.attr<int32_t>("padding_idx"))
-            .Attr("scale_grad_by_freq", op.attr<int32_t>("scale_grad_by_freq"))
+            .Attr("scale_grad_by_freq", op.attr<bool>("scale_grad_by_freq"))
             .Build();
     op.BindGradTensorWithOpInput(in_grad_op.output("dx", 0), "weight", 0);
     AddOp(in_grad_op);
@@ -159,7 +157,5 @@ REGISTER_USER_OP_GRAD("embedding").SetGenBackwardOpConfFn([](const user_op::User
   return Maybe<void>::Ok();
 });
 
-
-}  // namespace
 
 }  // namespace oneflow

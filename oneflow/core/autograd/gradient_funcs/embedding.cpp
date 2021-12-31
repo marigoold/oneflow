@@ -39,14 +39,14 @@ class Embedding : public OpExprGradFunction<EmbeddingCaptureState> {
   AttrMap base_attrs_;
 };
 
-Maybe<void> Gather::Init(const OpExpr& op) {
+Maybe<void> Embedding::Init(const OpExpr& op) {
   const UserOpExpr* fw_op_expr = dynamic_cast<const UserOpExpr*>(&op);
   CHECK_NOTNULL_OR_RETURN(fw_op_expr);
   base_attrs_ = MakeAttrMapFromUserOpConf(fw_op_expr->proto());
   return Maybe<void>::Ok();
 }
 
-Maybe<void> Gather::Capture(GatherCaptureState* ctx, const TensorTuple& inputs,
+Maybe<void> Embedding::Capture(EmbeddingCaptureState* ctx, const TensorTuple& inputs,
                             const TensorTuple& outputs, const AttrMap& attrs) const {
   ctx->requires_grad = inputs.at(0)->requires_grad();
   if (!ctx->requires_grad) { return Maybe<void>::Ok(); }
@@ -60,7 +60,7 @@ Maybe<void> Gather::Capture(GatherCaptureState* ctx, const TensorTuple& inputs,
   return Maybe<void>::Ok();
 }
 
-Maybe<void> Gather::Apply(const GatherCaptureState* ctx, const TensorTuple& out_grads,
+Maybe<void> Embedding::Apply(const EmbeddingCaptureState* ctx, const TensorTuple& out_grads,
                           TensorTuple* in_grads) const {
   if (!ctx->requires_grad) { return Maybe<void>::Ok(); }
   CHECK_EQ_OR_RETURN(out_grads.size(), 1);
@@ -74,6 +74,8 @@ Maybe<void> Gather::Apply(const GatherCaptureState* ctx, const TensorTuple& out_
       JUST(functional::EmbeddingGrad(out_grads.at(0), weight, indices, padding_idx, scale_grad_by_freq));
   return Maybe<void>::Ok();
 }
+
+REGISTER_OP_EXPR_GRAD_FUNCTION("embedding", Embedding);
 
 }  // namespace one
 }  // namespace oneflow

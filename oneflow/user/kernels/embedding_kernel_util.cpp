@@ -18,7 +18,7 @@ limitations under the License.
 
 namespace oneflow {
 
-template<DeviceType device_type, typename T, typename index_T>
+template<typename T, typename index_T>
 struct EmbeddingRenormFunctor<DeviceType::kCPU, T, index_T> final{
     void operator()(ep::Stream* stream, const T* in_buf, const index_T* indices_buf, T* out_buf,
                     const double max_norm, const double norm_type,  const int32_t dim0, const int32_t dim1, const int32_t num_indices){
@@ -29,7 +29,7 @@ struct EmbeddingRenormFunctor<DeviceType::kCPU, T, index_T> final{
             if (i > 0 && sorted_indices[i] == sorted_indices[i - 1]) {
                 continue;
             }
-            CHECK_OR_RETURN(sorted_indices[i] >= 0 && sorted_indices[i] < dim0);
+            CHECK(sorted_indices[i] >= 0 && sorted_indices[i] < dim0);
             double v = 0;
             for(int j = dim1 *sorted_indices[i]; j < dim1 * (sorted_indices[i]+1); j++){
                 double item = in_buf[j];
@@ -40,50 +40,47 @@ struct EmbeddingRenormFunctor<DeviceType::kCPU, T, index_T> final{
                 }else{
                     v += std::pow(item, norm_type);
                 }
-            }
-            
+            } 
+            v = std::pow(v, (1.0 / norm_type));
             if (v > max_norm) {
                 double scale = max_norm / (v + 1e-7);
                 for(int j = dim1 *sorted_indices[i]; j < dim1 * (sorted_indices[i]+1); j++){
-                    in_buf[j] *= scale;
+                    out_buf[j] = in_buf[j] * scale;
                 }
             }
 
         }
     }
 
-}
+};
 
 
-template<DeviceType device_type, typename T, typename index_T>
+template<typename T, typename index_T>
 struct EmbeddingFunctor<DeviceType::kCPU, T, index_T> final{
     void operator()(ep::Stream* stream, const T* weight_buf, const index_T* indices_buf, T* out_buf,
-                    const int32_t padding_idx, const int32_t scale_grad_by_freq,  
+                    const int32_t padding_idx, const bool scale_grad_by_freq,  
                     const int32_t dim0, const int32_t dim1, const int32_t emb_size){
         for(int32_t i = 0;i < dim0; i++){
-            int32_t indice = indices_buf[i];
-            T* from = weight_buf + indice * dim1;
+            index_T indice = indices_buf[i];
+            const T* from = weight_buf + indice * dim1;
             T* to = out_buf + i * dim1;
             std::copy(from, from + dim1, to);
         }
     }
-}
+};
 
 
-template<DeviceType device_type, typename T, typename index_T>
+template<typename T, typename index_T>
 struct EmbeddingGradFunctor<DeviceType::kCPU, T, index_T> final{
     void operator()(ep::Stream* stream, const T* dy_buf, const index_T* indices_buf, T* dx_buf,
                     const int32_t padding_idx, const bool scale_grad_by_freq,  const int32_t dim0, const int32_t dim1, const int32_t emb_size){
         for(int32_t i = 0;i < dim0; i++){
             int32_t indice = indices_buf[i];
-            T* from = dy_buf + i * dim1;
-            T* to = dx + indice * dim1;
-            std::transform(from, from + dim1, to, to, std::plus<T>());
-        }
-        
-        if(padding_idx >= 0){
-             T* from = dx + padding_idx * dim1;
-             Memset<DeviceType::kCPU>(stream, from, 0, dim1 * sizeof(T));
+            if(indice != padding_idx){
+                 const T* from = dy_buf + i * dim1;
+                 T* to = dx_buf + indice * dim1;
+                 std::transform(from, from + dim1, to, to, std::plus<T>());
+            }
         }
 
         if(scale_grad_by_freq){
@@ -94,7 +91,7 @@ struct EmbeddingGradFunctor<DeviceType::kCPU, T, index_T> final{
 
             for(int32_t i = 0; i< emb_size;i++){
                 if(indice_freq[i]>1){
-                    T* from = dx_buf + indice_freq[i] * dim1;
+                    T* from = dx_buf + i * dim1;
                     for(int32_t j=0; j<dim1; j++){
                         from[j]/=indice_freq[i];
                     }
@@ -103,6 +100,17 @@ struct EmbeddingGradFunctor<DeviceType::kCPU, T, index_T> final{
         }
         
     }
-}
+};
+
+#define INITIATE_EMBEDDING_KERNEL_UTIL_CPU_IMPL(in_type_pair, index_type_pair)                   \
+      template struct EmbeddingRenormFunctor<DeviceType::kCPU, OF_PP_PAIR_FIRST(in_type_pair),   \
+                                       OF_PP_PAIR_FIRST(index_type_pair)>;                       \
+      template struct EmbeddingFunctor<DeviceType::kCPU, OF_PP_PAIR_FIRST(in_type_pair),         \
+                                       OF_PP_PAIR_FIRST(index_type_pair)>;                       \
+      template struct EmbeddingGradFunctor<DeviceType::kCPU, OF_PP_PAIR_FIRST(in_type_pair),     \
+                                       OF_PP_PAIR_FIRST(index_type_pair)>;
+OF_PP_SEQ_PRODUCT_FOR_EACH_TUPLE(INITIATE_EMBEDDING_KERNEL_UTIL_CPU_IMPL, EMBEDDING_DATA_TYPE_SEQ,
+                                 INDEX_DATA_TYPE_SEQ);
+#undef INITIATE_EMBEDDING_KERNEL_UTIL_CPU_IMPL
 
 }  // namespace oneflow
