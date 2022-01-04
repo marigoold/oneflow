@@ -27,8 +27,8 @@ from test_util import GenArgList
 
 @flow.unittest.skip_unless_1n4d()
 @unittest.skipIf(os.getenv("ONEFLOW_TEST_CPU_ONLY"), "only test cpu cases")
-class TestEagerConsistentCastExhaustiveTesting(flow.unittest.TestCase):
-    def test_eager_consistent_cast_1d_exhaustive_testing(test_case):
+class TestEagerBoxingSymmetricExhaustiveTesting(flow.unittest.TestCase):
+    def test_eager_boxing_symmetric_1d_exhaustive_testing(test_case):
         import itertools
 
         sbps = [
@@ -55,7 +55,7 @@ class TestEagerConsistentCastExhaustiveTesting(flow.unittest.TestCase):
             z = y.to_consistent(placement=placement, sbp=[flow.sbp.broadcast])
             test_case.assertTrue(np.allclose(z.to_local().numpy(), np_arr),)
 
-    def test_eager_consistent_cast_2d_exhaustive_testing(test_case):
+    def test_eager_boxing_symmetric_2d_exhaustive_testing(test_case):
         import itertools
 
         sbps = [
