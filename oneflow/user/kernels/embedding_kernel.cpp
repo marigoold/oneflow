@@ -39,14 +39,14 @@ class CpuEmbeddingRenormKernel final : public user_op::OpKernel {
     const double norm_type = ctx->Attr<double>("norm_type");
 
     const ShapeView& in_shape = in->shape();
-    const int32_t dim0 = in_shape.At(0);
-    const int32_t dim1 = in_shape.At(1);
+    const int32_t emb_size = in_shape.At(0);
+    const int32_t emb_dim = in_shape.At(1);
     const T* in_buf = in->dptr<T>();
     const index_T* indices_buf = indices->dptr<index_T>();
     T* out_buf = out->mut_dptr<T>();
     const int32_t num_indices = indices->shape().elem_cnt();
     EmbeddingRenormFunctor<DeviceType::kCPU,T, index_T>()(ctx->stream(), in_buf, indices_buf, out_buf, 
-                                                          max_norm, norm_type, dim0, dim1, num_indices);
+                                                          max_norm, norm_type, emb_size, emb_dim, num_indices);
   }
   bool AlwaysComputeWhenAllOutputsEmpty() const override { return false; }
 };
@@ -68,15 +68,15 @@ class CpuEmbeddingKernel final : public user_op::OpKernel {
     const bool scale_grad_by_freq = ctx->Attr<bool>("scale_grad_by_freq");
 
     const ShapeView& out_shape = out->shape();
-    const int32_t dim0 = out_shape.Count(0 , out_shape.NumAxes()-1);
-    const int32_t dim1 = out_shape.At(out_shape.NumAxes()-1);
+    const int32_t num_indices = out_shape.Count(0 , out_shape.NumAxes()-1);
+    const int32_t emb_dim = out_shape.At(out_shape.NumAxes()-1);
     const int32_t emb_size = weight->shape().At(0);
     const T* weight_buf = weight->dptr<T>();
     const index_T* indices_buf = indices->dptr<index_T>();
     T* out_buf = out->mut_dptr<T>();
 
     EmbeddingFunctor<DeviceType::kCPU,T, index_T>()(ctx->stream(), weight_buf, indices_buf, out_buf, 
-                                              padding_idx, scale_grad_by_freq, dim0, dim1, emb_size);
+                                              padding_idx, scale_grad_by_freq, num_indices, emb_dim, emb_size);
   }
   bool AlwaysComputeWhenAllOutputsEmpty() const override { return false; }
 };
@@ -97,8 +97,8 @@ class CpuEmbeddingGradKernel final : public user_op::OpKernel {
     const bool scale_grad_by_freq = ctx->Attr<bool>("scale_grad_by_freq");
     
     const ShapeView& dy_shape = dy->shape();
-    const int32_t dim0 = dy_shape.Count(0 , dy_shape.NumAxes()-1);
-    const int32_t dim1 = dy_shape.At(dy_shape.NumAxes()-1);
+    const int32_t num_indices = dy_shape.Count(0 , dy_shape.NumAxes()-1);
+    const int32_t emb_dim = dy_shape.At(dy_shape.NumAxes()-1);
     const int32_t emb_size = weight->shape().At(0);
     
     const T* dy_buf = dy->dptr<T>();
@@ -106,7 +106,7 @@ class CpuEmbeddingGradKernel final : public user_op::OpKernel {
     T* dx_buf = dx->mut_dptr<T>();
     Memset<DeviceType::kCPU>(ctx->stream(), dx_buf, 0, dx->shape().Count(0) * sizeof(T));
     EmbeddingGradFunctor<DeviceType::kCPU,T, index_T>()(ctx->stream(), dy_buf, indices_buf, dx_buf, 
-                                              padding_idx, scale_grad_by_freq, dim0, dim1, emb_size);
+                                              padding_idx, scale_grad_by_freq, num_indices, emb_dim, emb_size);
   }
   bool AlwaysComputeWhenAllOutputsEmpty() const override { return false; }
 };
